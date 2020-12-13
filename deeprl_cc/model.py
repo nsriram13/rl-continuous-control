@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import math
 from collections import OrderedDict
@@ -7,6 +6,9 @@ import torch
 import torch.nn as nn
 import torch.nn.init as init
 from torch.distributions.normal import Normal
+
+
+HIDDEN_LAYERS = 32
 
 
 def gaussian_fill_w_gain(tensor, activation, dim_in, min_std=0.0) -> None:
@@ -26,11 +28,11 @@ class FullyConnectedActor(nn.Module):
         self.model = nn.Sequential(
             OrderedDict(
                 [
-                    ('fc1', nn.Linear(self.state_dim, 128)),
-                    ('relu1', nn.ReLU()),
-                    ('fc2', nn.Linear(128, 128)),
-                    ('relu2', nn.ReLU()),
-                    ('fc3', nn.Linear(128, self.action_dim * 2)),
+                    ('fc1', nn.Linear(self.state_dim, HIDDEN_LAYERS)),
+                    ('relu1', nn.Tanh()),
+                    ('fc2', nn.Linear(HIDDEN_LAYERS, HIDDEN_LAYERS)),
+                    ('relu2', nn.Tanh()),
+                    ('fc3', nn.Linear(HIDDEN_LAYERS, self.action_dim * 2)),
                 ]
             )
         )
@@ -67,18 +69,6 @@ class FullyConnectedActor(nn.Module):
 
         return log_prob
 
-    # @torch.no_grad()
-    # def get_log_prob(self, state, squashed_action):
-    #
-    #     dist = self._distribution(state)
-    #     loc, scale = self._get_loc_and_scale(state)
-    #
-    #     raw_action = torch.atanh(squashed_action)
-    #     r = (raw_action - loc) / scale
-    #     log_prob = dist.log_prob(r).sum(axis=-1)
-    #
-    #     return log_prob
-
 
 class FullyConnectedCritic(nn.Module):
     def __init__(self, state_dim):
@@ -88,11 +78,11 @@ class FullyConnectedCritic(nn.Module):
         self.model = nn.Sequential(
             OrderedDict(
                 [
-                    ('fc1', nn.Linear(state_dim, 128)),
-                    ('relu1', nn.ReLU()),
-                    ('fc2', nn.Linear(128, 128)),
-                    ('relu2', nn.ReLU()),
-                    ('fc3', nn.Linear(128, 1)),
+                    ('fc1', nn.Linear(state_dim, HIDDEN_LAYERS)),
+                    ('relu1', nn.Tanh()),
+                    ('fc2', nn.Linear(HIDDEN_LAYERS, HIDDEN_LAYERS)),
+                    ('relu2', nn.Tanh()),
+                    ('fc3', nn.Linear(HIDDEN_LAYERS, 1)),
                 ]
             )
         )
@@ -100,26 +90,3 @@ class FullyConnectedCritic(nn.Module):
     def forward(self, x):
         # return torch.squeeze(self.model(x), -1)
         return self.model(x)
-
-
-# class MLPActorCritic(nn.Module):
-#
-#     def __init__(self, state_dim, action_dim):
-#         super(MLPActorCritic, self).__init__()
-#
-#         # policy builder depends on action space
-#         self.pi = FullyConnectedActor(state_dim, action_dim)
-#
-#         # build value function
-#         self.v = FullyConnectedCritic(state_dim)
-#
-#     def step(self, state):
-#         with torch.no_grad():
-#             pi = self.pi._distribution(state)
-#             a = pi.sample()
-#             logp_a = self.pi.get_log_prob(state, a)
-#             v = self.v(state)
-#         return a.detach().numpy(), v.detach().numpy(), logp_a.detach().numpy()
-#
-#     def act(self, state):
-#         return self.step(state)[0]

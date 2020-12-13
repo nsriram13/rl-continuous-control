@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import logging
 
@@ -12,6 +11,7 @@ from .replay_buffer import PPOBuffer
 
 logger = logging.getLogger(__name__)
 
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 LR = 3e-4
 
 
@@ -33,9 +33,9 @@ class PPOAgent:
         self.action_dim = action_dim
         self.num_agents = num_agents
 
-        self.policy_network = FullyConnectedActor(state_dim, action_dim)
-        self.value_network = FullyConnectedCritic(state_dim)
-        self.value_loss_fn = torch.nn.MSELoss(reduction="elementwise_mean")
+        self.policy_network = FullyConnectedActor(state_dim, action_dim).to(device)
+        self.value_network = FullyConnectedCritic(state_dim).to(device)
+        self.value_loss_fn = torch.nn.MSELoss(reduction="elementwise_mean").to(device)
 
         self.optimizer = optim.Adam(self.policy_network.parameters(), lr=LR, eps=1e-5)
         self.optimizer_value_net = optim.Adam(
@@ -59,6 +59,7 @@ class PPOAgent:
         )
 
     def propose_action(self, state):
+        state.to(device)
         self.policy_network.eval()
         with torch.no_grad():
             pi = self.policy_network._distribution(state)
@@ -66,16 +67,7 @@ class PPOAgent:
             logp_a = self.policy_network.get_log_prob(state, a)
             v = self.value_network(state)
         self.policy_network.train()
-        return a.detach().numpy(), v.detach().numpy(), logp_a.detach().numpy()
-
-    # def act(self, state):
-    #     self.policy_network.eval()
-    #     with torch.no_grad():
-    #         pi = self.policy_network._distribution(state)
-    #     self.policy_network.train()
-    #
-    #     a = pi.sample()
-    #     return a.detach().numpy()
+        return a.detach().cpu().numpy(), v.detach().cpu().numpy(), logp_a.detach().cpu().numpy()
 
     def train(self, states, actions, rewards, values, logp, dones):
         self.traj_buffer.store(states, actions, rewards, values, logp, dones)
@@ -86,7 +78,7 @@ class PPOAgent:
                 last_val = np.array([[0]] * self.num_agents)
             else:
                 _, last_val, _ = self.propose_action(
-                    torch.as_tensor(states, dtype=torch.float32)
+                    torch.as_tensor(states, dtype=torch.float32).to(device)
                 )
             self.traj_buffer.finish_path(last_val.squeeze())
             training_data = self.traj_buffer.get()
@@ -133,25 +125,25 @@ class PPOAgent:
 
         # Value loss: use reward-to-go as label for training the value function
         offset_reinforcement = trajectory.reward_to_go
-        baselines = self.value_network(trajectory.state).squeeze()
-        losses["value_net_loss"] = self.value_loss_fn(baselines, offset_reinforcement)
+        baselines = self.value_network(trajectory.state.to(device)).squeeze()
+        losses["value_net_loss"] = self.value_loss_fn(baselines.to(device), offset_reinforcement.to(device))
 
         # Policy loss
         target_propensity = self.policy_network.get_log_prob(
-            trajectory.state.unsqueeze(0), trajectory.action
+            trajectory.state.unsqueeze(0).to(device), trajectory.action.to(device)
         ).squeeze()
         characteristic_eligibility = torch.exp(
-            target_propensity - trajectory.logp.detach()
+            target_propensity - trajectory.logp.detach().to(device)
         ).float()
         clipped_advantage = (
             torch.clamp(
                 characteristic_eligibility, 1 - self.ppo_epsilon, 1 + self.ppo_epsilon
             )
-            * trajectory.advantage
+            * trajectory.advantage.to(device)
         )
         losses["ppo_loss"] = -(
             torch.min(
-                characteristic_eligibility * trajectory.advantage, clipped_advantage
+                characteristic_eligibility * trajectory.advantage.to(device), clipped_advantage
             )
         ).mean()
 
