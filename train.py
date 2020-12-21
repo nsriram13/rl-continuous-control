@@ -28,7 +28,7 @@ flags.DEFINE_integer(
     "ppo_batch_size", 64, "batch size (number of trajectories) used for PPO updates"
 )
 flags.DEFINE_list(
-    "ac_net", [[64, 64], [["tanh", "tanh"]]], "actor critic network configuration"
+    "ac_net", [[64, 64], ["tanh", "tanh"]], "actor critic network configuration"
 )
 
 # Solution constraints

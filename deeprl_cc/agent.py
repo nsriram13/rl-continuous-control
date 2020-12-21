@@ -39,7 +39,7 @@ class PPOAgent:
             activations = ["tanh", "tanh"]
 
         self.actor_critic = MLPActorCritic(
-            state_dim, action_dim, hidden_sizes, activations, seed
+            state_dim, action_dim, hidden_sizes, activations, seed=seed
         ).to(device)
         self.state_normalizer = MeanStdNormalizer()
         self.update_epochs = update_epochs
