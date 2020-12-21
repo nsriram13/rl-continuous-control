@@ -1,136 +1,98 @@
 # -*- coding: utf-8 -*-
-from collections import namedtuple
-
 import numpy as np
-import scipy.signal
 import torch
-
-
-def combined_shape(length, shape=None):
-    if shape is None:
-        return (length,)
-    return (length, shape) if np.isscalar(shape) else (length, *shape)
-
-
-def discount_cumsum(x, discount):
-    """
-    magic from rllab for computing discounted cumulative sums of vectors.
-    input:
-        vector x,
-        [x0,
-         x1,
-         x2]
-    output:
-        [x0 + discount * x1 + discount^2 * x2,
-         x1 + discount * x2,
-         x2]
-    """
-    return scipy.signal.lfilter([1], [1, float(-discount)], x[::-1], axis=0)[::-1]
+from .utils import tensor
 
 
 class PPOBuffer:
-    """
-    A buffer for storing trajectories experienced by a PPO agent interacting
-    with the environment, and using Generalized Advantage Estimation (GAE-Lambda)
-    for calculating the advantages of state-action pairs.
-    """
+    def __init__(self, size, num_agents, gamma=0.99, lam=0.95):
 
-    def __init__(self, obs_dim, act_dim, num_agents, size, gamma=0.99, lam=0.95):
-        self.obs_buf = np.zeros(
-            combined_shape(size, (num_agents, obs_dim)), dtype=np.float32
-        )
-        self.act_buf = np.zeros(
-            combined_shape(size, (num_agents, act_dim)), dtype=np.float32
-        )
-        self.adv_buf = np.zeros(combined_shape(size, num_agents), dtype=np.float32)
-        self.rew_buf = np.zeros(combined_shape(size, num_agents), dtype=np.float32)
-        self.ret_buf = np.zeros(combined_shape(size, num_agents), dtype=np.float32)
-        self.val_buf = np.zeros(combined_shape(size, num_agents), dtype=np.float32)
-        self.logp_buf = np.zeros(combined_shape(size, num_agents), dtype=np.float32)
-        self.dones_buf = np.zeros(combined_shape(size, num_agents), dtype=np.float32)
+        self.max_size = size
+        self.num_agents = num_agents
         self.gamma, self.lam = gamma, lam
-        self.ptr, self.path_start_idx, self.max_size, self.num_agents = (
-            0,
-            0,
-            size,
-            num_agents,
-        )
-        self.obs_dim, self.act_dim = obs_dim, act_dim
-        self.trajectory = namedtuple(
-            "Trajectory",
-            field_names=["state", "action", "reward_to_go", "advantage", "logp"],
-        )
 
-    def store(self, obs, act, rew, val, logp, dones):
-        """
-        Append one timestep of agent-environment interaction to the buffer.
-        """
-        assert self.ptr < self.max_size  # buffer has to have room so you can store
-        self.obs_buf[self.ptr] = obs
-        self.act_buf[self.ptr] = act
-        self.rew_buf[self.ptr] = rew
-        self.val_buf[self.ptr] = val
-        self.logp_buf[self.ptr] = logp
-        self.dones_buf[self.ptr] = dones
-        self.ptr += 1
+        # buffers for storing experiences
+        self.obs_buf = []
+        self.act_buf = []
+        self.rew_buf = []
+        self.val_buf = []
+        self.logp_buf = []
+        self.ep_not_done_buf = []
+        self.adv_buf = [0.0] * size
+        self.ret_buf = [0.0] * size
+
+    def flush_all(self):
+        """Reset the buffer"""
+        self.obs_buf = []
+        self.act_buf = []
+        self.rew_buf = []
+        self.val_buf = []
+        self.logp_buf = []
+        self.ep_not_done_buf = []
+        self.adv_buf = [0.0] * self.max_size
+        self.ret_buf = [0.0] * self.max_size
+
+    def store(
+        self,
+        states=None,
+        actions=None,
+        rewards=None,
+        values=None,
+        log_prob_actions=None,
+        episode_not_dones=None,
+    ):
+        if states is not None:
+            self.obs_buf.append(states)
+        if actions is not None:
+            self.act_buf.append(actions)
+        if rewards is not None:
+            self.rew_buf.append(rewards)
+        if values is not None:
+            self.val_buf.append(values)
+        if log_prob_actions is not None:
+            self.logp_buf.append(log_prob_actions)
+        if episode_not_dones is not None:
+            self.ep_not_done_buf.append(episode_not_dones)
 
     def finish_path(self, last_val=0):
-        """
-        Call this at the end of a trajectory, or when one gets cut off
-        by an epoch ending. This looks back in the buffer to where the
-        trajectory started, and uses rewards and value estimates from
-        the whole trajectory to compute advantage estimates with GAE-Lambda,
-        as well as compute the rewards-to-go for each state, to use as
-        the targets for the value function.
-        The "last_val" argument should be 0 if the trajectory ended
-        because the agent reached a terminal state (died), and otherwise
-        should be V(s_T), the value function estimated for the last state.
-        This allows us to bootstrap the reward-to-go calculation to account
-        for timesteps beyond the arbitrary episode horizon (or epoch cutoff).
-        """
-
-        path_slice = slice(self.path_start_idx, self.ptr)
-        rews = np.append(self.rew_buf[path_slice], [last_val], axis=0)
-        vals = np.append(self.val_buf[path_slice], [last_val], axis=0)
-
-        # the next two lines implement GAE-Lambda advantage calculation
-        deltas = rews[:-1] + self.gamma * vals[1:] - vals[:-1]
-        self.adv_buf[path_slice] = discount_cumsum(deltas, self.gamma * self.lam)
+        self.rew_buf.append(None)
+        self.ep_not_done_buf.append(None)
 
         # the next line computes rewards-to-go, to be targets for the value function
-        self.ret_buf[path_slice] = discount_cumsum(rews, self.gamma)[:-1]
+        for i in reversed(range(self.max_size)):
+            returns = self.rew_buf[i] + self.gamma * self.ep_not_done_buf[i] * last_val
+            self.ret_buf[i] = returns.detach()
 
-        self.path_start_idx = self.ptr
+        # GAE-Lambda advantage calculation
+        advs = tensor(np.zeros((self.num_agents, 1)))
+        for i in reversed(range(self.max_size)):
+            deltas = (
+                self.rew_buf[i]
+                + (self.gamma * self.ep_not_done_buf[i] * self.val_buf[i + 1])
+                - self.val_buf[i]
+            )
+            advs = advs * self.lam * self.gamma * self.ep_not_done_buf[i] + deltas
+            self.adv_buf[i] = advs.detach()
 
     def get(self):
         """
         Call this at the end of an epoch to get all of the data from
         the buffer, with advantages appropriately normalized (shifted to have
-        mean zero and std one). Also, resets some pointers in the buffer.
+        mean zero and std one). Also, flushes the buffer to get ready to accept
+        next round of trajectory data.
         """
-        assert self.ptr == self.max_size  # buffer has to be full before you can get
-        self.ptr, self.path_start_idx = 0, 0
-        # the next two lines implement the advantage normalization trick
-        adv_mean, adv_std = self.adv_buf.mean(), self.adv_buf.std()
-        self.adv_buf = (self.adv_buf - adv_mean) / adv_std
 
-        # Prepare data for training
-        dim = self.num_agents * self.max_size
-        data = dict(
-            obs=self.obs_buf.reshape(dim, self.obs_dim),
-            act=self.act_buf.reshape(dim, self.act_dim),
-            ret=self.ret_buf.reshape(-1),
-            adv=self.adv_buf.reshape(-1),
-            logp=self.logp_buf.reshape(-1),
-        )
-        data = {k: torch.as_tensor(v, dtype=torch.float32) for k, v in data.items()}
-        return [
-            self.trajectory(
-                data['obs'][i],
-                data['act'][i],
-                data['ret'][i],
-                data['adv'][i],
-                data['logp'][i],
-            )
-            for i in range(len(data['obs']))
-        ]
+        # concatenate the trajectories of all agents
+        obs = torch.cat(self.obs_buf, dim=0)
+        act = torch.cat(self.act_buf, dim=0)
+        log_p = torch.cat(self.logp_buf, dim=0)
+        ret = torch.cat(self.ret_buf, dim=0)
+        adv = torch.cat(self.adv_buf, dim=0)
+
+        # advantage normalization trick
+        adv = (adv - adv.mean()) / adv.std()
+
+        # reset the buffer
+        self.flush_all()
+
+        return obs, act, log_p, ret, adv

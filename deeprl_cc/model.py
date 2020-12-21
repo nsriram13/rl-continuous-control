@@ -1,125 +1,62 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import math
-from collections import OrderedDict
+import random
 
 import torch
 import torch.nn as nn
-import torch.nn.init as init
-from torch.distributions.normal import Normal
+import torch.nn.functional as F
+
+from .utils import FullyConnectedNetwork, tensor
 
 
-def gaussian_fill_w_gain(tensor, activation, dim_in, min_std=0.0) -> None:
-    """ Gaussian initialization with gain."""
-    gain = math.sqrt(2) if (activation == "relu" or activation == "leaky_relu") else 1
-    init.normal_(tensor, mean=0, std=max(gain * math.sqrt(1 / dim_in), min_std))
+class MLPActorCritic(nn.Module):
+    def __init__(
+        self,
+        state_dim,
+        action_dim,
+        hidden_sizes=None,
+        activations=None,
+        action_activation="linear",
+        seed=0,
+    ):
 
+        super(MLPActorCritic, self).__init__()
+        self.seed = random.seed(seed)
 
-class FullyConnectedActor(nn.Module):
-    def __init__(self, state_dim: int, action_dim: int):
+        if hidden_sizes is None:
+            hidden_sizes = [64, 64]
 
-        super(FullyConnectedActor, self).__init__()
-        self.state_dim = state_dim
-        self.action_dim = action_dim
+        if activations is None:
+            activations = ["tanh", "tanh"]
 
-        # The last layer is mean & scale for re-parameterization trick
-        self.model = nn.Sequential(
-            OrderedDict(
-                [
-                    ('fc1', nn.Linear(self.state_dim, 128)),
-                    ('relu1', nn.ReLU()),
-                    ('fc2', nn.Linear(128, 128)),
-                    ('relu2', nn.ReLU()),
-                    ('fc3', nn.Linear(128, self.action_dim * 2)),
-                ]
-            )
+        assert state_dim > 0, f"state_dim must be > 0, got {state_dim}"
+        assert action_dim > 0, f"action_dim must be > 0, got {action_dim}"
+        assert len(hidden_sizes) == len(
+            activations
+        ), "The numbers of sizes and activations must match; got {} vs {}".format(
+            len(hidden_sizes), len(activations)
         )
 
-    def _get_loc_and_scale(self, state):
-        out = self.model(state)
-        loc = out[::, : self.action_dim]
-        scale = torch.exp(out[::, self.action_dim :].clamp(-20, 2))
+        self.policy_network = FullyConnectedNetwork(
+            [state_dim] + hidden_sizes + [action_dim], activations + [action_activation]
+        )
 
-        return loc, scale
+        self.value_network = FullyConnectedNetwork(
+            [state_dim] + hidden_sizes + [1], activations + [action_activation]
+        )
 
-    def _distribution(self, state):
-        loc, scale = self._get_loc_and_scale(state)
-        return Normal(loc=loc, scale=scale)
+        self.log_std = nn.Parameter(torch.zeros(action_dim))
 
     def forward(self, state):
-        loc, scale = self._get_loc_and_scale_log(state)
-        r = torch.randn_like(scale, device=scale.device)
-        raw_action = loc + r * scale
-        squashed_action = torch.tanh(raw_action)
-        squashed_mean = torch.tanh(loc)
-        # log_prob = self.get_log_prob(state, squashed_action)
-        log_prob = self.get_log_prob(state, raw_action)
+        state = tensor(state)
 
-        return squashed_action, log_prob, squashed_mean
+        # Get Value estimate
+        v = self.value_network(state)
 
-    def get_log_prob(self, state, raw_action):
+        # Get actions and log probability
+        mean = self.policy_network(state)
+        squashed_mean = torch.tanh(mean)
+        scale = F.softplus(self.log_std)
+        action_distribution = torch.distributions.Normal(loc=squashed_mean, scale=scale)
 
-        dist = self._distribution(state)
-        loc, scale = self._get_loc_and_scale(state)
-        r = (raw_action - loc) / scale
-        # log_prob = dist.log_prob(r).sum(axis=-1)
-        log_prob = torch.sum(dist.log_prob(r), dim=1).reshape(-1, 1)
-
-        return log_prob
-
-    # @torch.no_grad()
-    # def get_log_prob(self, state, squashed_action):
-    #
-    #     dist = self._distribution(state)
-    #     loc, scale = self._get_loc_and_scale(state)
-    #
-    #     raw_action = torch.atanh(squashed_action)
-    #     r = (raw_action - loc) / scale
-    #     log_prob = dist.log_prob(r).sum(axis=-1)
-    #
-    #     return log_prob
-
-
-class FullyConnectedCritic(nn.Module):
-    def __init__(self, state_dim):
-        super(FullyConnectedCritic, self).__init__()
-        self.state_dim = state_dim
-
-        self.model = nn.Sequential(
-            OrderedDict(
-                [
-                    ('fc1', nn.Linear(state_dim, 128)),
-                    ('relu1', nn.ReLU()),
-                    ('fc2', nn.Linear(128, 128)),
-                    ('relu2', nn.ReLU()),
-                    ('fc3', nn.Linear(128, 1)),
-                ]
-            )
-        )
-
-    def forward(self, x):
-        # return torch.squeeze(self.model(x), -1)
-        return self.model(x)
-
-
-# class MLPActorCritic(nn.Module):
-#
-#     def __init__(self, state_dim, action_dim):
-#         super(MLPActorCritic, self).__init__()
-#
-#         # policy builder depends on action space
-#         self.pi = FullyConnectedActor(state_dim, action_dim)
-#
-#         # build value function
-#         self.v = FullyConnectedCritic(state_dim)
-#
-#     def step(self, state):
-#         with torch.no_grad():
-#             pi = self.pi._distribution(state)
-#             a = pi.sample()
-#             logp_a = self.pi.get_log_prob(state, a)
-#             v = self.v(state)
-#         return a.detach().numpy(), v.detach().numpy(), logp_a.detach().numpy()
-#
-#     def act(self, state):
-#         return self.step(state)[0]
+        return v, action_distribution
