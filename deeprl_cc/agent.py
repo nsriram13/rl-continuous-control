@@ -60,15 +60,14 @@ class PPOAgent:
             self.optimizer, lr_lambda=lrate_schedule
         )
 
-        # Variables for storing current
+        # Variables for storing current states and predictions
+        self.first_state = True
         self.normalized_states = None
         self.actions = None
         self.values = None
         self.log_proba = None
 
         self.steps = 0  # counter to keep track of steps per rollout
-
-        self.first_state = True
 
     @staticmethod
     def get_log_prob(action_distribution, actions):

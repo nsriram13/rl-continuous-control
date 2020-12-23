@@ -5,6 +5,16 @@ from .utils import tensor
 
 
 class PPOBuffer:
+    """
+    A buffer for storing trajectories experienced by a PPO agent interacting
+    with the environment, and using Generalized Advantage Estimation (GAE-Lambda)
+    for calculating the advantages of state-action pairs.
+
+    The API for this implementation is inspired by OpenAI SpinningUp
+    reference implementation:
+    https://github.com/openai/spinningup/blob/master/spinup/algos/pytorch/ppo/ppo.py
+    """
+
     def __init__(self, size, num_agents, gamma=0.99, lam=0.95):
 
         self.max_size = size
@@ -54,13 +64,13 @@ class PPOBuffer:
         if episode_not_dones is not None:
             self.ep_not_done_buf.append(episode_not_dones)
 
-    def finish_path(self, last_val=0):
+    def finish_path(self, returns):
         self.rew_buf.append(None)
         self.ep_not_done_buf.append(None)
 
         # the next line computes rewards-to-go, to be targets for the value function
         for i in reversed(range(self.max_size)):
-            returns = self.rew_buf[i] + self.gamma * self.ep_not_done_buf[i] * last_val
+            returns = self.rew_buf[i] + self.gamma * self.ep_not_done_buf[i] * returns
             self.ret_buf[i] = returns.detach()
 
         # GAE-Lambda advantage calculation
