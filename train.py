@@ -13,38 +13,40 @@ logging.set_verbosity(logging.INFO)
 
 # Hyper-parameters
 FLAGS = flags.FLAGS
-flags.DEFINE_float("gamma", 0.99, "discount factor")
+flags.DEFINE_float("gamma", 0.99, "Discount factor used for PPO update")
 flags.DEFINE_float("lam", 0.95, "GAE Lambda")
-flags.DEFINE_float("learning_rate", 2e-4, "learning rate for the actor critic network")
-flags.DEFINE_float("gradient_clip", 0.75, "clips gradient norm at this value")
+flags.DEFINE_float("learning_rate", 2e-4, "Learning rate for the actor critic network")
+flags.DEFINE_float("gradient_clip", 0.75, "Clip gradient norm at this value")
 flags.DEFINE_float(
-    "ppo_epsilon", 0.1, "clamp importance weights between 1-epsilon and 1+epsilon"
+    "ppo_epsilon", 0.1, "Clamp importance weights between 1-epsilon and 1+epsilon"
 )
-flags.DEFINE_integer("update_freq", 250, "how many env steps between updates")
+flags.DEFINE_integer("update_freq", 250, "Number of env steps between updates")
 flags.DEFINE_integer(
-    "update_epochs", 10, "how many epochs to run when updating (for PPO)"
+    "update_epochs", 10, "Number of epochs to run when updating (for PPO)"
 )
 flags.DEFINE_integer(
-    "ppo_batch_size", 64, "batch size (number of trajectories) used for PPO updates"
+    "ppo_batch_size", 64, "Batch size (number of trajectories) used for PPO updates"
 )
 flags.DEFINE_list(
-    "ac_net", [[64, 64], ["tanh", "tanh"]], "actor critic network configuration"
+    "ac_net", [[64, 64], ["tanh", "tanh"]], "Actor critic network configuration"
 )
 
 # Solution constraints
 flags.DEFINE_float(
-    "target_score", 30, "score to achieve in order to solve the environment"
+    "target_score", 30, "Score to achieve in order to solve the environment"
 )
-flags.DEFINE_float("max_episodes", 250, "maximum number of episodes")
+flags.DEFINE_float("max_episodes", 250, "Maximum number of episodes")
 
 # Miscellaneous flags
-flags.DEFINE_integer("seed", 0, "random seed")
-flags.DEFINE_string("checkpoint", None, "checkpoint.pth")
+flags.DEFINE_integer("seed", 0, "Random number generator seed")
+flags.DEFINE_string(
+    "checkpoint", "checkpoint.pth", "Save the model weights to this file"
+)
 
 
 def main(_):
 
-    env = UnityEnvironment(file_name="./Reacher_Linux_NoVis/Reacher.x86_64")
+    env = UnityEnvironment(file_name="./Reacher_Linux_NoVis_CLI/Reacher.x86_64")
 
     # get the default brain
     brain_name = env.brain_names[0]
@@ -91,19 +93,21 @@ def main(_):
     logging.info(f"AC Network HParam: Gradient clip set to {FLAGS.gradient_clip}")
 
     logging.info(
+        f"PPO Learning HParam: "
+        f"Trajectories accumulated between updates {FLAGS.update_freq}"
+    )
+    logging.info(
+        f"PPO Learning HParam: "
+        f"Number of trajectories per PPO batch update set to {FLAGS.ppo_batch_size}"
+    )
+    logging.info(
+        f"PPO Learning HParam: Number of epochs per PPO update {FLAGS.update_epochs}"
+    )
+    logging.info(
         f"PPO Learning HParam: Surrogate functions clip set to {FLAGS.ppo_epsilon}"
     )
     logging.info(f"PPO Learning HParam: Discounting factor set to {FLAGS.gamma}")
     logging.info(f"PPO Learning HParam: GAE Lambda set to {FLAGS.lam}")
-    logging.info(
-        f"PPO Learning HParam: "
-        f"# trajectories per PPO batch update set to {FLAGS.ppo_batch_size}"
-    )
-    logging.info(f"PPO Learning HParam: # epochs per PPO update {FLAGS.update_epochs}")
-    logging.info(
-        f"PPO Learning HParam: "
-        f"Trajectories accumulated between updates {FLAGS.update_freq}"
-    )
 
     # see if GPU is available for training
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -137,22 +141,19 @@ def main(_):
 
     while True:
 
-        states = env_info.vector_observations  # get the current state (for each agent)
-        scores = np.zeros(num_agents)  # initialize the score (for each agent)
+        states = env_info.vector_observations  # get the current state
+        # scores = np.zeros(num_agents)  # initialize the score (for each agent)
 
-        for t in range(FLAGS.update_freq):
+        for _ in range(FLAGS.update_freq):
             actions = agent.propose_action(states)
             actions = np.clip(actions.cpu().detach().numpy(), -1, 1)
 
-            # move the environment forward
             env_info = env.step(actions)[
                 brain_name
-            ]  # send all actions to tne environment
-            next_states = (
-                env_info.vector_observations
-            )  # get next state (for each agent)
-            rewards = env_info.rewards  # get reward (for each agent)
-            dones = env_info.local_done  # see if episode finished for each agent
+            ]  # send the action to the environment
+            next_states = env_info.vector_observations  # get the next state
+            rewards = env_info.rewards  # get the reward
+            dones = env_info.local_done  # see if episode has finished
 
             # accumulate rewards
             online_rewards += rewards
@@ -175,9 +176,9 @@ def main(_):
                         mean_scores.append(mean_score_over_agents)
 
                         logging.info(
-                            f'\rEpisode {num_episodes}'
-                            f'\tAverage Score: {mean_score_over_agents:.2f}'
-                            f'\tAverage over last 100 episodes: {np.mean(last_100_scores)}'  # noqa: E501
+                            f'Episode {num_episodes}'
+                            f' | Average score this episode: {mean_score_over_agents:.3f}'  # noqa: E501
+                            f' | Average over last 100 episodes: {np.mean(last_100_scores):.3f}'  # noqa: E501
                         )
 
                     online_rewards[i] = 0  # Reset accumulated reward for next episode
@@ -189,11 +190,13 @@ def main(_):
 
             agent.step(states, actions, rewards, next_states, dones)  # Teach the agent
 
-            scores += rewards  # update the score (for each agent)
+            # scores += rewards  # update the score
             states = next_states  # roll over states to next time step
 
+        # train the agent
         agent.train(states)
 
+        # check for termination criteria
         if mean_last_100 > FLAGS.target_score:
             print(
                 f"Environment solved in {num_episodes-100} episodes! "
