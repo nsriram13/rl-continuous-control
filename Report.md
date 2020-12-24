@@ -30,7 +30,6 @@ encoded as a learnable scalar.
 
 We implement the PPO-Clip loss as outlined
 [here](https://spinningup.openai.com/en/latest/algorithms/ppo.html?highlight=PPO#key-equations).
-
 Reproducing the equation for the loss for ease of reference (this loss function is the core of PPO):
 
 ![Loss](images/lossp1.svg)
@@ -114,3 +113,12 @@ The source code can be accessed at https://github.com/nsriram13/rl-continuous-co
 * Saxe, Andrew M., et al. Exact Solutions to the Nonlinear Dynamics of Learning in Deep Linear Neural Networks. Dec. 2013. arxiv.org, https://arxiv.org/abs/1312.6120v3.
 * Schulman, John, Philipp Moritz, et al. High-Dimensional Continuous Control Using Generalized Advantage Estimation. June 2015. arxiv.org, https://arxiv.org/abs/1506.02438v6.
 * Schulman, John, Filip Wolski, et al. Proximal Policy Optimization Algorithms. July 2017. arxiv.org, https://arxiv.org/abs/1707.06347v2.
+
+## Acknowledgements
+It would not have been possible to implement this algorithm correctly without the help
+from the many great implementations of PPO that are made available in the open source
+by the RL community. We would like to reference the following implementations and thank
+the authors for making these valuable resources available online for free:
+* [DeepRL](https://github.com/ShangtongZhang/DeepRL) by Shangtong Zhang
+* [ReAgent](https://github.com/facebookresearch/ReAgent/blob/master/reagent/training/ppo_trainer.py) from Facebook Research
+* [Spinning Up](https://github.com/openai/spinningup/blob/master/spinup/algos/pytorch/ppo/ppo.py) from OpenAI
