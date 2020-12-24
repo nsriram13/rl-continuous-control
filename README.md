@@ -1,6 +1,25 @@
 # Continuous Control
 Deep RL algorithms for solving Unity ML-Agents Reacher environment.
 
+## Project Details
+In this project, we train a PPO based agent to control a double-jointed arm to
+move to target locations. We use a Unity ML-Agents based environment provided by
+Udacity for this exercise. More details about the environment is provided below.
+
+* The observation space consists of 33 variables corresponding to position,
+  rotation, velocity, and angular velocities of the arm.
+* Each action is a vector with four numbers, corresponding to torque applicable
+  to two joints (clipped between -1 and 1).
+* A reward of +0.1 is provided for each step that the agent's hand is in the goal
+  location.
+* We use the distributed version of the environment - this environment has 20
+  double-jointed arms. This can be used to speed up data collection (and also helps
+  with randomizing training data).
+
+The goal of the agent is to maintain its position at the target location for as many
+time steps as possible. The environment is considered solved when the agent achieves
+a score of +30 over 100 consecutive episode and over all the 20 parallel arms.
+
 ## Getting Started
 
 To set up your python environment to run the code in this repository, follow the instructions below.
@@ -52,3 +71,57 @@ You need only select the environment that matches your operating system:
 
 7. Place the file in the root directory of this repo and unzip (or decompress) the file. The notebook to train the
 agent will look for the environment at the project root.
+
+## Instructions
+
+Run `python train.py` to train the agent with the default set of hyper-parameters.
+Alternatively, you can modify the hyper-parameters by invoking the scripts with
+the optional CLI flags; for e.g. say you want to use a different learning rate for
+training the neural network, you can do so by running `python train.py --learning-rate=1e-5`.
+The full list of flags is shown below. You can access this list anytime by
+running `python train.py --help`.
+
+```bash
+       USAGE: train.py [flags]
+flags:
+
+train.py:
+  --ac_net: Actor critic network configuration
+    (default: '"[64, 64]","[\'tanh\', \'tanh\']"')
+    (a comma separated list)
+  --checkpoint: Save the model weights to this file
+    (default: './checkpoints/checkpoint.pth')
+  --gamma: Discount factor used for PPO update
+    (default: '0.99')
+    (a number)
+  --gradient_clip: Clip gradient norm at this value
+    (default: '0.75')
+    (a number)
+  --lam: GAE Lambda
+    (default: '0.95')
+    (a number)
+  --learning_rate: Learning rate for the actor critic network
+    (default: '0.0002')
+    (a number)
+  --max_episodes: Maximum number of episodes
+    (default: '250')
+    (an integer)
+  --ppo_batch_size: Batch size (number of trajectories) used for PPO updates
+    (default: '64')
+    (an integer)
+  --ppo_epsilon: Clamp importance weights between 1-epsilon and 1+epsilon
+    (default: '0.1')
+    (a number)
+  --seed: Random number generator seed
+    (default: '0')
+    (an integer)
+  --target_score: Score to achieve in order to solve the environment
+    (default: '30.0')
+    (a number)
+  --update_epochs: Number of epochs to run when updating (for PPO)
+    (default: '10')
+    (an integer)
+  --update_freq: Number of env steps between updates
+    (default: '250')
+    (an integer)
+```
