@@ -22,9 +22,7 @@ The exact architecture used for the neural network is as follows.
 The input to both neural networks has 33 dimensions corresponding to position, rotation, velocity,
 and angular velocities of the arm. The first hidden layer is fully-connected and
 consists of 64 Tanh activation units. The second hidden layer is also fully-connected and consists of
-64 Tanh activation units.
-
-The output layer for the critic network is a fully-connected linear layer
+64 Tanh activation units. The output layer for the critic network is a fully-connected linear layer
 with a single output unit that yields the value estimate for a given state. The output layer for the
 actor network is a fully-connected linear layer which gives the mean of a normal distribution for each of
 the four action dimensions. We sample the action with this mean and standard deviation that is
@@ -70,10 +68,9 @@ ppo_batch_size | 64 | Batch size (number of trajectories) used for PPO updates
 gradient_clip | 0.75 | Clip gradient norm at this value
 
 The values of all the hyper-parameters were picked based on an informal assessment of
-performance and is likely not the optimal set of parameters.
-
-The training was very sensitive to the hyper-parameters and the agent would not make any progress in its task.
-We had to use the following tricks to get the network to learn:
+performance and is likely not the optimal set of parameters. The training was very
+sensitive to the hyper-parameters - the agent would often not make any progress in
+its task. We had to use the following tricks to get the network to learn:
 * normalize the input (states) to the network
 * initialize the weights with a (semi) orthogonal matrix, as described in _Saxe, A. et al. (2013)_.
 * clip the gradient norm at 0.75
