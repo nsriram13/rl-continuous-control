@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import pickle
 from collections import deque
 
 import numpy as np
@@ -35,18 +36,18 @@ flags.DEFINE_list(
 flags.DEFINE_float(
     "target_score", 30, "Score to achieve in order to solve the environment"
 )
-flags.DEFINE_float("max_episodes", 250, "Maximum number of episodes")
+flags.DEFINE_integer("max_episodes", 250, "Maximum number of episodes")
 
 # Miscellaneous flags
 flags.DEFINE_integer("seed", 0, "Random number generator seed")
 flags.DEFINE_string(
-    "checkpoint", "checkpoint.pth", "Save the model weights to this file"
+    "checkpoint", "./checkpoints/checkpoint.pth", "Save the model weights to this file"
 )
 
 
 def main(_):
 
-    env = UnityEnvironment(file_name="./Reacher_Linux_NoVis_CLI/Reacher.x86_64")
+    env = UnityEnvironment(file_name="./Reacher_Linux_NoVis/Reacher.x86_64")
 
     # get the default brain
     brain_name = env.brain_names[0]
@@ -73,20 +74,21 @@ def main(_):
     logging.info(f'The state for the first agent looks like: {states[0]}')
 
     # Setup some variable for keeping track of the performance
-    num_episodes = 0
-    last_100_scores = deque(maxlen=100)  # last 100 episode scores
-    episode_scores = [
-        []
-    ] * num_agents  # nested list containing scores from each episode for every agent
-    mean_scores = []  # list containing scores from each episode averaged across agents
+    episode_counter_across_agents = 0
+    episodes_completed = 0
+
+    windowed_score = deque(maxlen=100)  # last 100 episode scores
+    mean_windowed_score = 0
+
     online_rewards = np.zeros(
         num_agents
     )  # array to accumulate agent rewards as the episode progresses
+    episode_scores = np.zeros(
+        (num_agents, FLAGS.max_episodes)
+    )  # array to keep track of scores from each episode for every agent
+    mean_scores = []  # list containing scores from each episode averaged across agents
 
-    episodes_finished = 0
-    mean_last_100 = 0
-
-    # Initialize the agent
+    # Log all the hyperparameters
     logging.info(f"AC Network HParam: Learning rate set to {FLAGS.learning_rate}")
     logging.info(f"AC Network HParam: Hidden sizes set to {FLAGS.ac_net[0]}")
     logging.info(f"AC Network HParam: Activations set to {FLAGS.ac_net[1]}")
@@ -142,7 +144,6 @@ def main(_):
     while True:
 
         states = env_info.vector_observations  # get the current state
-        # scores = np.zeros(num_agents)  # initialize the score (for each agent)
 
         for _ in range(FLAGS.update_freq):
             actions = agent.propose_action(states)
@@ -160,57 +161,63 @@ def main(_):
 
             for i, done in enumerate(dones):
                 if done:
-                    episode_scores[i].append(online_rewards[i])
-                    episodes_finished += 1
+                    episodes_completed += 1
+                    episode_scores[i][
+                        int((episodes_completed - 1) / num_agents)
+                    ] = online_rewards[i]
 
                     # if all agents have finished an episode
-                    if (episodes_finished % num_agents) == 0:
-                        num_episodes += 1
-                        total_over_agents = 0
-                        for j in range(num_agents):
-                            total_over_agents += episode_scores[j][-1]
+                    if (episodes_completed % num_agents) == 0:
+                        episode_counter_across_agents += 1
 
                         # save most recent score
-                        mean_score_over_agents = total_over_agents / num_agents
-                        last_100_scores.append(mean_score_over_agents)
-                        mean_scores.append(mean_score_over_agents)
+                        average_score_this_episode = episode_scores[
+                            :, episode_counter_across_agents - 1
+                        ].mean()
+                        windowed_score.append(average_score_this_episode)
+                        mean_scores.append(average_score_this_episode)
 
                         logging.info(
-                            f'Episode {num_episodes}'
-                            f' | Average score this episode: {mean_score_over_agents:.3f}'  # noqa: E501
-                            f' | Average over last 100 episodes: {np.mean(last_100_scores):.3f}'  # noqa: E501
+                            f'Episode {episode_counter_across_agents}'
+                            f' | Average score this episode: {average_score_this_episode:.3f}'  # noqa: E501
+                            f' | Average over last 100 episodes: {np.mean(windowed_score):.3f}'  # noqa: E501
                         )
 
                     online_rewards[i] = 0  # Reset accumulated reward for next episode
-                    mean_last_100 = np.mean(last_100_scores)
+                    mean_windowed_score = np.mean(windowed_score)
 
-                    if mean_last_100 > FLAGS.target_score:
+                    if mean_windowed_score > FLAGS.target_score:
                         logging.info("Environment solved!")
                         break
 
             agent.step(states, actions, rewards, next_states, dones)  # Teach the agent
 
-            # scores += rewards  # update the score
             states = next_states  # roll over states to next time step
 
         # train the agent
         agent.train(states)
 
         # check for termination criteria
-        if mean_last_100 > FLAGS.target_score:
+        if mean_windowed_score > FLAGS.target_score:
             print(
-                f"Environment solved in {num_episodes-100} episodes! "
-                f"Score: {mean_last_100}."
+                f"Environment solved in {episode_counter_across_agents-100} episodes! "
+                f"Score: {mean_windowed_score}."
             )
             agent.save_checkpoint(file_name=FLAGS.checkpoint)
             break
 
-        if num_episodes > FLAGS.max_episodes:
+        if episode_counter_across_agents >= FLAGS.max_episodes:
             print(
-                f"Episode {num_episodes} exceeded {FLAGS.max_episodes}. "
+                f"Episode {episode_counter_across_agents} exceeded {FLAGS.max_episodes}. "  # noqa: E501
                 f"Failed to solve environment!"
             )
             break
+
+    # pickle and save the agent performance scores
+    with open('./checkpoints/episode_scores.pkl', 'wb') as f:
+        pickle.dump(episode_scores[:, :episode_counter_across_agents], f)
+    with open('./checkpoints/mean_scores.pkl', 'wb') as f:
+        pickle.dump(mean_scores, f)
 
 
 if __name__ == "__main__":
