@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import logging
+import pickle
 
 import numpy as np
 import torch
@@ -190,3 +191,7 @@ class PPOAgent:
     def save_checkpoint(self, file_name):
         logging.info("Checkpointing weights")
         torch.save(self.actor_critic.state_dict(), file_name)
+
+        logging.info("Saving state normalizer parameters")
+        with open('./checkpoints/state_normalizer.pkl', 'wb') as f:
+            pickle.dump(self.state_normalizer.state_dict(), f)
